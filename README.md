@@ -4,7 +4,7 @@ A fan-made Geometry Dash card-collecting (gacha) game. Players open packs, colle
 
 - **Website:** static HTML, CSS and JS, hosted on GitHub Pages
 - **Server:** Supabase (database, auth, real-time, edge function)
-- **Setup guide:** [SETUP.md](SETUP.md)
+- **Step-by-step setup guide:** [SETUP.md](SETUP.md)
 
 Inspired by [gachagd.com](https://gachagd.com) by John119 and mochamaple. This is an independent project with original code, design and generated card art. It is not affiliated with gachagd.com or RobTop Games.
 
