@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EitanGD Gacha</title>
+  <meta name="description" content="EitanGD Gacha: a fan-made Geometry Dash card collecting game. Inspired by gachagd.com.">
+  <meta name="theme-color" content="#0a0e1a">
+  <link rel="icon" href="img/icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="top">
+    <a class="logo" href="#/" aria-label="EitanGD Gacha home">
+      <img src="img/icon.svg" alt="" width="34" height="34">
+      <span>EitanGD <b>Gacha</b></span>
+    </a>
+    <nav class="nav">
+      <a href="#/">Home</a>
+      <a href="#/catalog">Catalog</a>
+      <a href="#/admin">Admin</a>
+    </nav>
+    <div class="top-right">
+      <span class="orb-pill" title="Mana orbs"><span class="orb-i"></span><span id="orb-count">0</span></span>
+      <button class="icon-btn" id="mute" title="Toggle sound">🔊</button>
+    </div>
+  </header>
+
+  <main id="app"></main>
+
+  <footer class="foot">
+    <p><b>EitanGD Gacha</b> is a fan-made project and is not affiliated with RobTop Games or gachagd.com.</p>
+    <p>Geometry Dash © RobTop Games. Every level and its name belong to its creator, who is credited on each card. Difficulty tiers follow the GD community lists (GDDL, AREDL).</p>
+    <p>Inspired by <a href="https://gachagd.com" rel="noopener" target="_blank">gachagd.com</a> by John119 and mochamaple. Card art is generated, and all code and design are original.</p>
+  </footer>
+
+  <div id="modal" class="modal" hidden></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script src="js/data.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/cards.js"></script>
+  <script src="js/ui.js"></script>
+</body>
+</html>
