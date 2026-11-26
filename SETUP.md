@@ -4,7 +4,7 @@ This guide takes you from zero to a working site with accounts, the admin panel 
 
 **Time:** about 30–45 minutes. **Cost:** free.
 
-> **Why so many accounts?** GitHub Pages can only show files, it can't keep secrets. So the accounts, cards and orbs live on **Supabase** (a free database), and nobody can cheat by editing the page. **Cloudflare** stops bots with a captcha, and **Brevo** sends the 2FA email codes.
+> **Why so many accounts?** GitHub Pages can only show files, it can't keep secrets. So the accounts, cards and orbs live on **Supabase** (a free database), and nobody can cheat by editing the page. **Cloudflare** stops bots with a captcha. 2FA uses an **authenticator app** on your phone, so no email service is needed.
 
 ---
 
@@ -16,13 +16,11 @@ During the guide you'll copy several values. Keep this table open in a notes app
 |---|---|---|---|
 | A | Turnstile **Site Key** | Step 1 | No (goes in the website) |
 | B | Turnstile **Secret Key** | Step 1 | **Yes** |
-| C | Brevo **sender email** | Step 2 | No |
-| D | Brevo **API key** | Step 2 | **Yes** |
 | E | Supabase **Project URL** | Step 3 | No (goes in the website) |
 | F | Supabase **anon / publishable key** | Step 3 | No (goes in the website) |
 | G | Your site address | Step 0 | No |
 
-**Secret** values (B and D) must **never** go into any file in GitHub. They only go into Supabase's settings pages.
+The **secret** value (B) must **never** go into any file in GitHub. It only goes into Supabase's settings pages. (There are no C and D: those were for an email service the game no longer needs.)
 
 ---
 
@@ -47,14 +45,11 @@ During the guide you'll copy several values. Keep this table open in a notes app
 
 ---
 
-## Step 2: Brevo (sends the 2FA codes by email)
-1. [ ] Go to <https://www.brevo.com> → **Sign up free**, and finish the sign-up questions (any answers are fine).
-2. [ ] Click your name (top right) → **Senders, Domains & Dedicated IPs** → **Senders** tab → **Add a sender**.
-3. [ ] From name: `EitanGD Gacha`. From email: an email you own (e.g. your Gmail). Click **Save**.
-4. [ ] Open that email inbox and click the confirmation link Brevo sent you.
-5. [ ] Write the email address into your notes as **C**.
-6. [ ] Click your name → **SMTP & API** → **API Keys** tab → **Generate a new API key**. Name it `eitangd` and click **Generate**.
-7. [ ] Copy the key (it starts with `xkeysib-`) into your notes as **D**. It's only shown once.
+## Step 2: Install an authenticator app on your phone
+The admin account logs in with a password **plus** a 6-digit code from your phone. That code changes every 30 seconds, so a stolen password alone isn't enough.
+
+1. [ ] On your phone, install **one** of these free apps: **Google Authenticator**, **Microsoft Authenticator**, **Authy** or **2FAS**.
+2. [ ] That's all for now. You'll connect it to the game in Step 9.
 
 ---
 
@@ -104,13 +99,11 @@ In Supabase, left menu → **Authentication**:
 5. [ ] Click **Deploy function** and wait for it to finish.
 6. [ ] Open the **api** function → **Details** (or **Settings**) tab. Turn **OFF** **"Verify JWT with legacy secret"** / **"Enforce JWT verification"**, then click **Save**.
    - This is safe: the function checks every login itself. Login and signup can't send a token yet, because the player isn't logged in.
-7. [ ] Left menu → **Edge Functions** → **Secrets**. Add these four, one at a time (Name → Value → **Save**):
+7. [ ] Left menu → **Edge Functions** → **Secrets**. Add these two, one at a time (Name → Value → **Save**):
 
    | Name | Value |
    |---|---|
    | `TURNSTILE_SECRET` | **B** |
-   | `BREVO_API_KEY` | **D** |
-   | `MAIL_FROM` | **C** |
    | `ALLOWED_ORIGINS` | **G**, e.g. `https://eitanai-git.github.io` (no `/` at the end, no repo name) |
 
 ---
@@ -144,9 +137,14 @@ In Supabase, left menu → **Authentication**:
    ```
    It should say **"Success. 1 row affected"** (or similar).
 3. [ ] Back on the site, refresh the page. Click your name (top right) to open **Account**.
-4. [ ] Under **Email 2FA**, type your email and click **Send code**. Enter the 6-digit code from your inbox and click **Confirm**. (Check spam the first time.)
-5. [ ] Click the **🛠 Admin** button at the top. The admin panel opens. 🎉
-6. [ ] From now on, every time you log in you'll also be asked for an email code. That's the admin protection.
+4. [ ] Under **Two-factor login (2FA)**, click **Set up 2FA**. A QR code appears.
+5. [ ] In your authenticator app, tap **+** → **Scan a QR code**, and point your phone at the screen. "EitanGD Gacha" appears in the app with a 6-digit code.
+   - Setting it up on the same phone? Choose **Enter a setup key** instead and type the key shown under the QR code.
+6. [ ] Type the code from the app into the box and click **Turn on 2FA**.
+7. [ ] Click the **🛠 Admin** button at the top. The admin panel opens. 🎉
+8. [ ] From now on, every login asks for the current code from the app. That's the admin protection.
+
+> 💡 Keep the authenticator app on your phone. If you delete it or lose your phone, see **"Lost your phone"** in the table below.
 
 ---
 
@@ -176,10 +174,11 @@ All ticked? You're done! 🎉
 | **"Origin not allowed"**, or a CORS error in the browser console (F12) | `ALLOWED_ORIGINS` must be exactly **G**: no trailing `/`, no `/gd-gacha-clone`. |
 | **"No connection"** when logging in | The function isn't named exactly `api`, or isn't deployed (Step 6). |
 | **"Signed out"** right after logging in | JWT verification is still on for the function (Step 6.6), or the SQL in Step 4 didn't run. |
-| **"Email 2FA is not configured"** or **"Could not send the email code"** | Check `BREVO_API_KEY` and `MAIL_FROM`, and that the sender was confirmed (Step 2.4). |
+| **"Wrong code"** when setting up or logging in with 2FA | Use the **newest** code in the app, and make sure your phone's time is set automatically (Settings → Date & time → automatic). Codes only work for about 30 seconds. |
+| **Lost your phone** or deleted the authenticator app | In the Supabase **SQL Editor**, run (with your username): `select public.srv_twofa_disable(id) from public.profiles where lower(username) = lower('YourUsername');` Then log in with just your password and do Step 9.4–9.6 again. |
 | **"Could not start a session"** | Make sure the **Email** provider is enabled (Step 5.1). If the message mentions an invalid email, add the secret `INTERNAL_EMAIL_DOMAIN` = `users.example.com` *before* anyone else signs up. |
 | Kicks/popups only show after refreshing | Turn on **profiles** and **notifications** in Step 4.4. |
-| Admin panel says **"Admin tools are locked"** | Turn on Email 2FA (Step 9.4), then log out and log in again with the code. |
+| Admin panel says **"Admin tools are locked"** | Turn on 2FA (Step 9.4–9.6). If it's already on, log out and log in again with the app code. |
 | Forgot your admin password | Accounts have no real email, so password-recovery emails can't work. Instead, run this in the Supabase SQL Editor (lowercase username): `update auth.users set encrypted_password = extensions.crypt('NewPassword123!', extensions.gen_salt('bf', 10)) where email = 'yourname@users.eitangd.invalid';` |
 
 ---
@@ -202,7 +201,10 @@ All ticked? You're done! 🎉
   - Errors never reveal whether a username exists, and logins always take the same time.
   - Passwords need 10+ characters, can't contain the username, and are checked against known data breaches.
   - Passwords are stored as bcrypt hashes. Nobody, not even the admin, can see them.
-- **Email 2FA:** 6-digit codes, stored only as hashes, valid for 10 minutes, with 5 tries. Required for admins, optional for players.
+- **2FA with an authenticator app (TOTP):**
+  - Required for admins, optional for players.
+  - The secret key stays on the server and players can never read it.
+  - Each code works only once, and a login gets 5 tries before it expires.
 - **No shortcut around the login:** a session counts only if the game's server function created it. Logging in directly against Supabase gives a token the game refuses.
 - **Real-time enforcement:**
   - Kick, ban and password changes delete the player's sessions on the server.

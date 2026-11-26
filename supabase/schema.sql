@@ -12,6 +12,7 @@
 --  * A session counts only if the "api" Edge Function created it (it is listed
 --    in app_sessions). Logging in straight against Supabase Auth gives a
 --    session that every game function rejects, so lockouts and 2FA cannot be bypassed.
+--  * 2FA uses an authenticator app (TOTP). Secrets sit in twofa_secrets, which no player can read.
 --  * srv_* functions are callable only with the service-role key (the Edge Function).
 -- =====================================================================
 
@@ -138,6 +139,20 @@ create table if not exists public.twofa_challenges (
   created_at timestamptz not null default now()
 );
 
+-- Authenticator-app (TOTP) secrets. Never readable by players; only the Edge Function uses them.
+create table if not exists public.twofa_secrets (
+  user_id    uuid primary key references auth.users(id) on delete cascade,
+  secret     text not null,            -- base32
+  last_step  bigint not null default 0, -- last accepted 30-second step (stops code reuse)
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.totp_pending (
+  user_id    uuid primary key references auth.users(id) on delete cascade,
+  secret     text not null,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.login_events (
   id       bigint generated always as identity primary key,
   user_id  uuid references auth.users(id) on delete cascade,
@@ -173,6 +188,8 @@ alter table public.notifications    enable row level security;
 alter table public.app_sessions     enable row level security;
 alter table public.login_attempts   enable row level security;
 alter table public.twofa_challenges enable row level security;
+alter table public.twofa_secrets    enable row level security;
+alter table public.totp_pending     enable row level security;
 alter table public.login_events     enable row level security;
 alter table public.admin_log        enable row level security;
 
@@ -267,7 +284,7 @@ begin
     raise exception 'Not allowed' using errcode = '42501';
   end if;
   if not exists (select 1 from public.app_sessions where session_id = sid and twofa) then
-    raise exception 'Admin needs 2FA: turn on email 2FA in Account and log in again' using errcode = '42501';
+    raise exception 'Admin needs 2FA: turn it on in Account' using errcode = '42501';
   end if;
   return uid;
 end $$;
@@ -335,8 +352,6 @@ begin
     'daily', d, 'packsOpened', p.packs_opened::text, 'favorites', to_jsonb(p.favorites),
     'kickEpoch', p.kick_epoch, 'wipeEpoch', p.wipe_epoch,
     'twofaEnabled', p.twofa_enabled,
-    'twofaEmail', case when p.twofa_email is null then null
-                       else regexp_replace(p.twofa_email, '^(.).*(@.*)$', '\1***\2') end,
     'session', jsonb_build_object('twofa', s.twofa, 'impersonatedBy', s.impersonated_by),
     'adminReady', (p.role = 'admin' and s.twofa),
     'collection', coalesce((select jsonb_agg(jsonb_build_object(
@@ -659,6 +674,8 @@ begin
         packs_opened = 0, favorites = '{}', wipe_epoch = wipe_epoch + 1 where id = p_id;
     when 'reset_2fa' then
       update public.profiles set twofa_enabled = false, twofa_email = null where id = p_id;
+      delete from public.twofa_secrets where user_id = p_id;
+      delete from public.totp_pending where user_id = p_id;
     when 'promote' then
       update public.profiles set role = 'admin' where id = p_id;
     when 'demote' then
@@ -899,7 +916,7 @@ begin
   end if;
   delete from public.login_attempts where key = 'u:' || uname;
   return jsonb_build_object('userId', u.id, 'email', u.email, 'username', p.username,
-    'twofa', p.twofa_enabled and p.twofa_email is not null, 'twofaEmail', p.twofa_email, 'role', p.role);
+    'twofa', p.twofa_enabled and exists (select 1 from public.twofa_secrets t where t.user_id = u.id), 'role', p.role);
 end $$;
 
 create or replace function public.srv_check_password(p_user uuid, p_password text) returns boolean
@@ -947,44 +964,87 @@ language sql stable security definer set search_path = public, pg_temp
 as $$ select email from auth.users where id = p_user $$;
 
 -- 2FA challenges. Codes are stored as SHA-256 hashes.
-create or replace function public.srv_new_challenge(p_user uuid, p_purpose text, p_email text, p_code text, p_ip text, p_ua text)
-returns uuid language plpgsql security definer set search_path = public, extensions, pg_temp
+drop function if exists public.srv_new_challenge(uuid, text, text, text, text, text);
+drop function if exists public.srv_check_challenge(uuid, text, text);
+drop function if exists public.srv_set_twofa(uuid, text);
+
+-- A login waiting for its authenticator code. Valid 10 minutes, 5 tries.
+create or replace function public.srv_new_challenge(p_user uuid, p_purpose text, p_ip text, p_ua text)
+returns uuid language plpgsql security definer set search_path = public, pg_temp
 as $$
 declare cid uuid;
 begin
-  if (select count(*) from public.twofa_challenges where user_id = p_user and created_at > now() - interval '10 minutes') >= 5 then
-    raise exception 'Too many codes requested. Wait a few minutes.';
+  if (select count(*) from public.twofa_challenges where user_id = p_user and created_at > now() - interval '10 minutes') >= 10 then
+    raise exception 'Too many login attempts. Wait a few minutes.';
   end if;
   delete from public.twofa_challenges where user_id = p_user and purpose = p_purpose;
   insert into public.twofa_challenges(user_id, purpose, code_hash, email, expires_at, ip, ua)
-    values (p_user, p_purpose, encode(extensions.digest(p_code, 'sha256'), 'hex'), p_email, now() + interval '10 minutes', p_ip, p_ua)
+    values (p_user, p_purpose, '', '', now() + interval '10 minutes', p_ip, p_ua)
     returning id into cid;
   return cid;
 end $$;
 
--- Returns {userId, email, purpose} on success or {error}.
-create or replace function public.srv_check_challenge(p_id uuid, p_code text, p_purpose text) returns jsonb
-language plpgsql security definer set search_path = public, extensions, pg_temp
+-- Uses up one try. Returns {userId, left} or {error:'expired'}.
+create or replace function public.srv_challenge_attempt(p_id uuid, p_purpose text) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp
 as $$
 declare c public.twofa_challenges;
 begin
   select * into c from public.twofa_challenges where id = p_id and purpose = p_purpose for update;
-  if not found or c.expires_at < now() then return jsonb_build_object('error', 'expired'); end if;
-  if c.attempts >= 5 then
+  if not found or c.expires_at < now() or c.attempts >= 5 then
     delete from public.twofa_challenges where id = p_id;
     return jsonb_build_object('error', 'expired');
   end if;
-  if encode(extensions.digest(coalesce(p_code, ''), 'sha256'), 'hex') <> c.code_hash then
-    update public.twofa_challenges set attempts = attempts + 1 where id = p_id;
-    return jsonb_build_object('error', 'wrong', 'left', 4 - c.attempts);
-  end if;
-  delete from public.twofa_challenges where id = p_id;
-  return jsonb_build_object('userId', c.user_id, 'email', c.email, 'ip', c.ip, 'ua', c.ua);
+  update public.twofa_challenges set attempts = attempts + 1 where id = p_id;
+  return jsonb_build_object('userId', c.user_id, 'left', 4 - c.attempts);
 end $$;
 
-create or replace function public.srv_set_twofa(p_user uuid, p_email text) returns void
+create or replace function public.srv_challenge_done(p_id uuid) returns void
 language sql security definer set search_path = public, pg_temp
-as $$ update public.profiles set twofa_enabled = p_email is not null, twofa_email = p_email where id = p_user $$;
+as $$ delete from public.twofa_challenges where id = p_id $$;
+
+-- Authenticator-app setup and checks
+create or replace function public.srv_totp_begin(p_user uuid, p_secret text) returns void
+language sql security definer set search_path = public, pg_temp
+as $$ insert into public.totp_pending(user_id, secret) values (p_user, p_secret)
+      on conflict (user_id) do update set secret = excluded.secret, created_at = now() $$;
+
+create or replace function public.srv_totp_pending(p_user uuid) returns text
+language sql stable security definer set search_path = public, pg_temp
+as $$ select secret from public.totp_pending where user_id = p_user and created_at > now() - interval '15 minutes' $$;
+
+create or replace function public.srv_totp_enable(p_user uuid, p_step bigint) returns void
+language plpgsql security definer set search_path = public, pg_temp
+as $$
+begin
+  insert into public.twofa_secrets(user_id, secret, last_step)
+    select user_id, secret, p_step from public.totp_pending where user_id = p_user
+    on conflict (user_id) do update set secret = excluded.secret, last_step = excluded.last_step, created_at = now();
+  if not found then raise exception 'Setup expired. Start again.'; end if;
+  delete from public.totp_pending where user_id = p_user;
+  update public.profiles set twofa_enabled = true, twofa_email = null where id = p_user;
+end $$;
+
+create or replace function public.srv_totp_secret(p_user uuid) returns text
+language sql stable security definer set search_path = public, pg_temp
+as $$ select secret from public.twofa_secrets where user_id = p_user $$;
+
+-- Accepts a code's time step only once (no replay). True if accepted.
+create or replace function public.srv_totp_use(p_user uuid, p_step bigint) returns boolean
+language plpgsql security definer set search_path = public, pg_temp
+as $$
+begin
+  update public.twofa_secrets set last_step = p_step where user_id = p_user and last_step < p_step;
+  return found;
+end $$;
+
+create or replace function public.srv_twofa_disable(p_user uuid) returns void
+language sql security definer set search_path = public, pg_temp
+as $$
+  delete from public.twofa_secrets where user_id = p_user;
+  delete from public.totp_pending where user_id = p_user;
+  update public.profiles set twofa_enabled = false, twofa_email = null where id = p_user;
+$$;
 
 create or replace function public.srv_mark_twofa(p_session uuid) returns void
 language sql security definer set search_path = public, pg_temp
@@ -992,7 +1052,7 @@ as $$ update public.app_sessions set twofa = true where session_id = p_session $
 
 create or replace function public.srv_profile(p_user uuid) returns jsonb
 language sql stable security definer set search_path = public, pg_temp
-as $$ select jsonb_build_object('username', username, 'role', role, 'twofa', twofa_enabled, 'twofaEmail', twofa_email, 'status', status)
+as $$ select jsonb_build_object('username', username, 'role', role, 'twofa', twofa_enabled, 'status', status)
       from public.profiles where id = p_user $$;
 
 create or replace function public.srv_after_password_reset(p_user uuid, p_admin uuid) returns void
@@ -1043,8 +1103,10 @@ grant execute on function
   public.srv_log_login(uuid, text, boolean, text, text, text),
   public.srv_register_session(uuid, uuid, boolean, uuid, text, text), public.srv_is_admin(uuid, uuid),
   public.srv_session_ok(uuid, uuid), public.srv_user_email(uuid),
-  public.srv_new_challenge(uuid, text, text, text, text, text), public.srv_check_challenge(uuid, text, text),
-  public.srv_set_twofa(uuid, text), public.srv_mark_twofa(uuid), public.srv_profile(uuid),
+  public.srv_new_challenge(uuid, text, text, text), public.srv_challenge_attempt(uuid, text), public.srv_challenge_done(uuid),
+  public.srv_totp_begin(uuid, text), public.srv_totp_pending(uuid), public.srv_totp_enable(uuid, bigint),
+  public.srv_totp_secret(uuid), public.srv_totp_use(uuid, bigint), public.srv_twofa_disable(uuid),
+  public.srv_mark_twofa(uuid), public.srv_profile(uuid),
   public.srv_after_password_reset(uuid, uuid), public.srv_log_admin(uuid, text, uuid),
   public.srv_cleanup()
 to service_role;

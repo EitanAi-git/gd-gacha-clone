@@ -12,13 +12,13 @@ Inspired by [gachagd.com](https://gachagd.com) by John119 and mochamaple. This i
 - **Geometry Dash** © RobTop Games.
 - Every level belongs to its creator. Each card shows "by <creator>" under its name and a credit line in its art.
 - Difficulty tiers follow the GD community lists (GDDL, AREDL).
-- Uses [supabase-js](https://github.com/supabase/supabase-js) (MIT), vendored in `js/vendor/`.
+- Uses [supabase-js](https://github.com/supabase/supabase-js) (MIT) and [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) (MIT), vendored in `js/vendor/`.
 
 ## Features
 - **Accounts:**
   - Username and password, with a Cloudflare Turnstile captcha.
   - Lockouts after failed logins, and passwords checked against known breaches.
-  - Email 2FA: required for admins, optional for players.
+  - 2FA with an authenticator app (Google Authenticator, Authy…): required for admins, optional for players.
 - **Game:**
   - Packs with per-rarity odds; Foil and Full art versions.
   - Flip-to-reveal opening and bulk ×10.

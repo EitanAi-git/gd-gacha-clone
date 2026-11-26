@@ -1,5 +1,5 @@
 // EitanGD Gacha: admin panel (popup). Every action runs on the server and requires an admin
-// session with email 2FA. Inputs are bound to an in-memory draft store, so values survive
+// session with 2FA (authenticator app). Inputs are bound to an in-memory draft store, so values survive
 // saves, refreshes and switching categories.
 window.AdminPanel = (function () {
   const A = window.API;
@@ -117,7 +117,7 @@ window.AdminPanel = (function () {
     }));
     if (!G.me.adminReady) {
       $(".ap-main", wrap).innerHTML = `<div class="ap-gate"><h3>Admin tools are locked</h3>
-        <p>Admins must use email 2FA. Turn it on in <b>Account</b>, then log out and log in again with the code.</p>
+        <p>Admins must use 2FA (an authenticator app). Turn it on in <b>Account</b>. Then the admin panel unlocks.</p>
         <button class="btn primary" id="ap-acct">Open Account</button></div>`;
       $("#ap-acct", wrap).addEventListener("click", () => { close(); window.App.openAccount(); });
       return;
@@ -337,7 +337,7 @@ window.AdminPanel = (function () {
   <div><dt>Collection value</dt><dd>${G.fmt(detail.value)}</dd></div>
   <div><dt>Packs opened</dt><dd>${G.fmt(p.packs_opened)}</dd></div>
   <div><dt>Daily streak</dt><dd>${p.daily_streak}${p.daily && p.daily.claimed ? " (claimed today)" : ""}</dd></div>
-  <div><dt>2FA</dt><dd>${p.twofa_enabled ? esc(p.twofa_email) : "off"}</dd></div>
+  <div><dt>2FA</dt><dd>${p.twofa_enabled ? "on (app)" : "off"}</dd></div>
   <div><dt>Joined</dt><dd>${when(p.created_at)}</dd></div>
   <div><dt>Last seen</dt><dd>${when(p.last_seen)}</dd></div>
   <div><dt>Favorites</dt><dd>${p.favorites.length ? p.favorites.map((f) => esc(cardName(f))).join(", ") : "—"}</dd></div>

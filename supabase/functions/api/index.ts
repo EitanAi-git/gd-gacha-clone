@@ -1,11 +1,9 @@
 // EitanGD Gacha: "api" Edge Function.
 // Handles everything that needs the service-role key: signup, login (lockout, captcha,
-// email 2FA), sessions, password changes, and the admin's "log in as" and "set password".
+// authenticator-app 2FA), sessions, password changes, and the admin's "log in as" and "set password".
 //
 // Secrets (Supabase → Edge Functions → Secrets):
 //   TURNSTILE_SECRET   Cloudflare Turnstile secret key            (required)
-//   BREVO_API_KEY      Brevo API key, used to email 2FA codes     (required for 2FA)
-//   MAIL_FROM          Verified sender address in Brevo           (required for 2FA)
 //   ALLOWED_ORIGINS    e.g. https://you.github.io,http://localhost:8000
 //   INTERNAL_EMAIL_DOMAIN  optional, default users.eitangd.invalid
 // SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are provided automatically.
@@ -19,8 +17,6 @@ const URL_ = Deno.env.get("SUPABASE_URL")!;
 const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
 const TURNSTILE_SECRET = Deno.env.get("TURNSTILE_SECRET") ?? "";
-const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY") ?? "";
-const MAIL_FROM = Deno.env.get("MAIL_FROM") ?? "";
 const EMAIL_DOMAIN = Deno.env.get("INTERNAL_EMAIL_DOMAIN") ?? "users.eitangd.invalid";
 const ORIGINS = (Deno.env.get("ALLOWED_ORIGINS") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
@@ -62,12 +58,6 @@ function decodeJwt(token: string): Record<string, unknown> {
   return JSON.parse(json);
 }
 
-function randomCode(): string {
-  const a = new Uint32Array(1);
-  crypto.getRandomValues(a);
-  return String(a[0] % 1_000_000).padStart(6, "0");
-}
-
 async function verifyCaptcha(token: unknown, ip: string) {
   if (!TURNSTILE_SECRET) throw new HttpError(500, "Captcha is not configured on the server");
   if (typeof token !== "string" || !token) throw new HttpError(400, "Please complete the captcha");
@@ -77,24 +67,55 @@ async function verifyCaptcha(token: unknown, ip: string) {
   if (!j.success) throw new HttpError(400, "Captcha failed, please try again");
 }
 
-async function sendCode(to: string, code: string, purpose: "login" | "setup") {
-  if (!BREVO_API_KEY || !MAIL_FROM) throw new HttpError(500, "Email 2FA is not configured on the server");
-  const what = purpose === "login" ? "log in to" : "turn on 2FA for";
-  const r = await fetch("https://api.brevo.com/v3/smtp/email", {
-    method: "POST",
-    headers: { "api-key": BREVO_API_KEY, "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({
-      sender: { email: MAIL_FROM, name: "EitanGD Gacha" },
-      to: [{ email: to }],
-      subject: `Your EitanGD Gacha code: ${code}`,
-      textContent: `Your code to ${what} EitanGD Gacha is ${code}. It expires in 10 minutes. If this wasn't you, change your password.`,
-      htmlContent: `<p>Your code to ${what} <b>EitanGD Gacha</b> is:</p><p style="font-size:28px;font-weight:bold;letter-spacing:6px">${code}</p><p>It expires in 10 minutes. If this wasn't you, change your password.</p>`,
-    }),
-  });
-  if (!r.ok) throw new HttpError(502, "Could not send the email code. Try again later.");
+// ---------------- authenticator app (TOTP, RFC 6238: SHA-1, 6 digits, 30 s) ----------------
+const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+function base32Encode(bytes: Uint8Array): string {
+  let bits = 0, value = 0, out = "";
+  for (const b of bytes) {
+    value = (value << 8) | b; bits += 8;
+    while (bits >= 5) { out += B32[(value >>> (bits - 5)) & 31]; bits -= 5; }
+  }
+  if (bits > 0) out += B32[(value << (5 - bits)) & 31];
+  return out;
 }
-
-function maskEmail(e: string) { return e.replace(/^(.).*(@.*)$/, "$1***$2"); }
+function base32Decode(s: string): Uint8Array {
+  const clean = s.toUpperCase().replace(/[^A-Z2-7]/g, "");
+  let bits = 0, value = 0; const out: number[] = [];
+  for (const ch of clean) {
+    value = (value << 5) | B32.indexOf(ch); bits += 5;
+    if (bits >= 8) { out.push((value >>> (bits - 8)) & 255); bits -= 8; }
+  }
+  return new Uint8Array(out);
+}
+export async function totpAt(secret: string, step: number, digits = 6): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", base32Decode(secret), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+  const msg = new ArrayBuffer(8);
+  new DataView(msg).setBigUint64(0, BigInt(step));
+  const h = new Uint8Array(await crypto.subtle.sign("HMAC", key, msg));
+  const o = h[h.length - 1] & 15;
+  const bin = ((h[o] & 127) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3];
+  return String(bin % 10 ** digits).padStart(digits, "0");
+}
+function sameText(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+// Returns the matching 30-second step (allowing ±1 step of clock drift) or null.
+async function matchTotp(secret: string, code: unknown): Promise<number | null> {
+  const c = String(code ?? "").replace(/\s/g, "");
+  if (!/^\d{6}$/.test(c)) return null;
+  const now = Math.floor(Date.now() / 30000);
+  let hit: number | null = null;
+  for (const step of [now - 1, now, now + 1]) if (sameText(await totpAt(secret, step), c)) hit = step;
+  return hit;
+}
+function newSecret(): string {
+  const b = new Uint8Array(20);
+  crypto.getRandomValues(b);
+  return base32Encode(b);
+}
 
 function checkPassword(pw: unknown, username?: string): string {
   if (typeof pw !== "string") throw new HttpError(400, "Password is required");
@@ -208,12 +229,8 @@ const actions: Record<string, (c: Ctx) => Promise<unknown>> = {
       if (r.error) throw new HttpError(401, "Invalid username or password");
 
       if (r.twofa) {
-        const code = randomCode();
-        const challenge = await rpc<string>("srv_new_challenge", {
-          p_user: r.userId, p_purpose: "login", p_email: r.twofaEmail, p_code: code, p_ip: ip, p_ua: ua,
-        });
-        await sendCode(r.twofaEmail, code, "login");
-        return { twofa: true, challenge, email: maskEmail(r.twofaEmail) };
+        const challenge = await rpc<string>("srv_new_challenge", { p_user: r.userId, p_purpose: "login", p_ip: ip, p_ua: ua });
+        return { twofa: true, challenge };
       }
       await rpc("srv_log_login", { p_user: r.userId, p_username: r.username, p_ok: true, p_reason: "password", p_ip: ip, p_ua: ua });
       return { session: await issueSession(r.userId, false, ip, ua), needsTwofa: r.role === "admin" };
@@ -226,37 +243,48 @@ const actions: Record<string, (c: Ctx) => Promise<unknown>> = {
 
   async verify2fa({ body, ip, ua }) {
     if (await rpc("srv_locked", { p_key: "2fa:" + ip })) throw new HttpError(429, "Too many attempts. Try again later.");
-    const r = await rpc<Record<string, any>>("srv_check_challenge", {
-      p_id: String(body.challenge ?? ""), p_code: String(body.code ?? "").trim(), p_purpose: "login",
-    }).catch((): Record<string, any> => ({ error: "expired" }));
-    if (r.error) {
+    const fail = async (msg: string) => {
       await rpc("srv_fail", { p_key: "2fa:" + ip, p_max: 20, p_window: "10 minutes", p_base_lock: "15 minutes", p_max_lock: "1 hour" });
-      if (r.error === "wrong") throw new HttpError(401, `Wrong code (${r.left} tr${r.left === 1 ? "y" : "ies"} left)`);
-      throw new HttpError(401, "This code expired. Log in again.");
+      throw new HttpError(401, msg);
+    };
+    const ch = await rpc<Record<string, any>>("srv_challenge_attempt", { p_id: String(body.challenge ?? ""), p_purpose: "login" })
+      .catch((): Record<string, any> => ({ error: "expired" }));
+    if (ch.error) return await fail("This login expired. Log in again.");
+    const secret = await rpc<string | null>("srv_totp_secret", { p_user: ch.userId });
+    const step = secret ? await matchTotp(secret, body.code) : null;
+    if (step === null || !(await rpc<boolean>("srv_totp_use", { p_user: ch.userId, p_step: step }))) {
+      await rpc("srv_log_login", { p_user: ch.userId, p_username: null, p_ok: false, p_reason: "wrong 2FA code", p_ip: ip, p_ua: ua });
+      return await fail(ch.left > 0 ? `Wrong code (${ch.left} tr${ch.left === 1 ? "y" : "ies"} left)` : "Too many wrong codes. Log in again.");
     }
-    await rpc("srv_log_login", { p_user: r.userId, p_username: null, p_ok: true, p_reason: "password + email 2FA", p_ip: ip, p_ua: ua });
-    return { session: await issueSession(r.userId, true, ip, ua) };
+    await rpc("srv_challenge_done", { p_id: String(body.challenge) });
+    await rpc("srv_log_login", { p_user: ch.userId, p_username: null, p_ok: true, p_reason: "password + authenticator", p_ip: ip, p_ua: ua });
+    return { session: await issueSession(ch.userId, true, ip, ua) };
   },
 
-  async twofaStart({ req, body, ip, ua }) {
+  // Step 1 of turning on 2FA: a new secret to scan as a QR code.
+  async twofaStart({ req }) {
     const u = await requireOwner(req);
-    const email = String(body.email ?? "").trim();
-    if (!/^[^\s@]{1,64}@[^\s@]{1,190}\.[a-z]{2,}$/i.test(email)) throw new HttpError(400, "Enter a valid email address");
-    const code = randomCode();
-    const challenge = await rpc<string>("srv_new_challenge", { p_user: u.id, p_purpose: "setup", p_email: email, p_code: code, p_ip: ip, p_ua: ua });
-    await sendCode(email, code, "setup");
-    return { challenge, email: maskEmail(email) };
+    const p = await rpc<Record<string, any>>("srv_profile", { p_user: u.id });
+    const secret = newSecret();
+    await rpc("srv_totp_begin", { p_user: u.id, p_secret: secret });
+    const label = encodeURIComponent("EitanGD Gacha:" + p.username);
+    const uri = `otpauth://totp/${label}?secret=${secret}&issuer=${encodeURIComponent("EitanGD Gacha")}&algorithm=SHA1&digits=6&period=30`;
+    return { secret, uri };
   },
 
+  // Step 2: prove the app works by typing its current code.
   async twofaConfirm({ req, body }) {
     const u = await requireOwner(req);
-    const r = await rpc<Record<string, any>>("srv_check_challenge", {
-      p_id: String(body.challenge ?? ""), p_code: String(body.code ?? "").trim(), p_purpose: "setup",
-    }).catch((): Record<string, any> => ({ error: "expired" }));
-    if (r.error === "wrong") throw new HttpError(401, `Wrong code (${r.left} left)`);
-    if (r.error || r.userId !== u.id) throw new HttpError(401, "This code expired. Start again.");
-    await rpc("srv_set_twofa", { p_user: u.id, p_email: r.email });
-    await rpc("srv_mark_twofa", { p_session: u.sid });   // this session just proved the email
+    if (await rpc("srv_locked", { p_key: "totp-setup:" + u.id })) throw new HttpError(429, "Too many attempts. Try again later.");
+    const secret = await rpc<string | null>("srv_totp_pending", { p_user: u.id });
+    if (!secret) throw new HttpError(400, "Setup expired. Start again.");
+    const step = await matchTotp(secret, body.code);
+    if (step === null) {
+      await rpc("srv_fail", { p_key: "totp-setup:" + u.id, p_max: 10, p_window: "15 minutes", p_base_lock: "5 minutes", p_max_lock: "1 hour" });
+      throw new HttpError(401, "Wrong code. Check the time on your phone and try the newest code.");
+    }
+    await rpc("srv_totp_enable", { p_user: u.id, p_step: step });
+    await rpc("srv_mark_twofa", { p_session: u.sid });   // this session just proved it has the app
     return { ok: true };
   },
 
@@ -267,7 +295,7 @@ const actions: Record<string, (c: Ctx) => Promise<unknown>> = {
     if (!(await rpc<boolean>("srv_check_password", { p_user: u.id, p_password: String(body.password ?? "") }))) {
       throw new HttpError(401, "Wrong password");
     }
-    await rpc("srv_set_twofa", { p_user: u.id, p_email: null });
+    await rpc("srv_twofa_disable", { p_user: u.id });
     return { ok: true };
   },
 
