@@ -229,7 +229,7 @@ window.App = (function () {
     lostShown = true;
     A.unsubscribe();
     stopHeartbeat();
-    $$(".dialog-wrap, .admin-wrap").forEach((d) => d.remove());
+    $$(".dialog-wrap, .admin-wrap, #block-overlay").forEach((d) => d.remove());
     const m = $("#modal"); m.hidden = true; m.innerHTML = "";
     const title = kind === "banned" ? "You have been banned" : kind === "kicked" ? "You were logged out" : kind === "password" ? "Password changed" : "Session ended";
     const text = kind === "banned" ? banText(row && row.ban_reason, row && row.ban_until)
@@ -263,6 +263,29 @@ window.App = (function () {
       ${n.title ? `<h2>${esc(n.title)}</h2>` : ""}<p>${esc(n.body).replace(/\n/g, "<br>")}</p>
       <button class="btn primary wide" data-close>OK</button></div>`, { className: "popup-dialog", onClose: nextPopup });
   }
+
+  // ---------------- block popup (cannot be closed) ----------------
+  function applyBlock() {
+    let ov = $("#block-overlay");
+    const reason = G.me && G.me.blockReason;
+    if (!reason) { if (ov) ov.parentNode.removeChild(ov); return; }
+    const imp = G.me.session && G.me.session.impersonatedBy;
+    if (!ov) {
+      ov = document.createElement("div");
+      ov.id = "block-overlay";
+      ov.className = "block-overlay";
+      ov.setAttribute("role", "alertdialog");
+      ov.setAttribute("aria-modal", "true");
+      document.body.appendChild(ov);
+      // swallow Escape so nothing behind it can be used
+      ov.addEventListener("keydown", (e) => { if (e.key === "Escape") e.stopPropagation(); }, true);
+    }
+    ov.innerHTML = `<div class="block-box"><div class="stop-icon">⛔</div><h1>Your account is blocked</h1>
+      <p class="block-reason">${esc(reason)}</p>
+      <button class="btn ghost small" id="block-out">${imp ? "Return to admin" : "Log out"}</button></div>`;
+    $("#block-out", ov).addEventListener("click", () => (imp ? returnToAdmin() : logout()));
+  }
+  G.onChange(applyBlock);
 
   // ---------------- impersonation bar ----------------
   function showImpBar() {
@@ -411,6 +434,7 @@ window.App = (function () {
         if (row.status === "banned") return lost("banned", row);
         if (row.kick_epoch > cur.kickEpoch) return lost("kicked", row);
         if (row.wipe_epoch > cur.wipeEpoch) toast("An admin reset your account", "bad");
+        if (row.block_reason && !cur.blockReason) { G.refresh().catch(() => {}); return; }
         if (row.status === "blocked" && cur.status !== "blocked") toast("Your account was suspended by an admin", "bad");
         if (row.status === "ok" && cur.status === "blocked") toast("Your account is no longer suspended", "good");
         softRefresh();

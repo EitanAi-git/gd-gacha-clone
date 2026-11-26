@@ -27,7 +27,7 @@ Inspired by [gachagd.com](https://gachagd.com) by John119 and mochamaple. This i
 - **Server-side everything:** orbs, cards, odds and prices live in the database, so editing the page can't cheat.
 - **Real time:** popups, kicks, bans, suspensions and wipes reach the player instantly.
 - **Admin panel** (popup with a collapsible category sidebar):
-  - Players: see all info, log in as them, kick, ban, suspend, wipe, reset, set password, give orbs or any number of any card, send popups.
+  - Players: see all info, log in as them, kick (one player or everyone), ban, suspend, block (a popup they can't close), wipe, reset, set password, give orbs or any number of any card, send popups.
   - Cards, Packs and Economy: edit every value, including what each card is worth.
   - Security (lockouts, login history) and Logs (every admin action).
 - **Searchable dropdowns** everywhere, **light and dark theme**, and a layout that works on phones.
