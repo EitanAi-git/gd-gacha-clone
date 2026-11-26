@@ -43,6 +43,8 @@ create table if not exists public.profiles (
   last_seen      timestamptz not null default now()
 );
 create unique index if not exists profiles_username_lower on public.profiles (lower(username));
+-- Block: the player can log in but sees a popup they cannot close (and cannot play). Null = not blocked.
+alter table public.profiles add column if not exists block_reason text;
 
 create table if not exists public.cards (
   id            text primary key,
@@ -269,6 +271,7 @@ begin
     end if;
   end if;
   if p_play and p.status = 'blocked' then raise exception 'Your account is suspended'; end if;
+  if p_play and p.block_reason is not null then raise exception 'Your account is blocked'; end if;
   if p.last_seen < now() - interval '1 minute' then
     update public.profiles set last_seen = now() where id = uid;
   end if;
@@ -350,7 +353,7 @@ begin
     'id', p.id, 'username', p.username, 'role', p.role, 'status', p.status,
     'orbs', p.orbs::text, 'pending', floor(p.pending)::bigint::text,
     'daily', d, 'packsOpened', p.packs_opened::text, 'favorites', to_jsonb(p.favorites),
-    'kickEpoch', p.kick_epoch, 'wipeEpoch', p.wipe_epoch,
+    'kickEpoch', p.kick_epoch, 'wipeEpoch', p.wipe_epoch, 'blockReason', p.block_reason,
     'twofaEnabled', p.twofa_enabled,
     'session', jsonb_build_object('twofa', s.twofa, 'impersonatedBy', s.impersonated_by),
     'adminReady', (p.role = 'admin' and s.twofa),
@@ -552,6 +555,7 @@ begin
     select jsonb_build_object('id', p.id, 'username', p.username, 'role', p.role, 'status', p.status,
       'orbs', p.orbs::text, 'lastSeen', p.last_seen, 'createdAt', p.created_at,
       'cards', (select coalesce(sum(qty), 0)::text from public.collection c where c.user_id = p.id),
+      'blocked', p.block_reason is not null,
       'online', exists (select 1 from public.app_sessions s where s.user_id = p.id)) x
     from public.profiles p
     where coalesce(p_q, '') = '' or p.username ilike '%' || replace(replace(p_q, '%', '\%'), '_', '\_') || '%'
@@ -648,7 +652,7 @@ as $$
 declare a uuid := assert_admin(); e jsonb := cfg('economy');
 begin
   if not exists (select 1 from public.profiles where id = p_id) then raise exception 'Player not found'; end if;
-  if p_id = a and p_action in ('kick','ban','block','demote','wipe') then raise exception 'You cannot do that to yourself'; end if;
+  if p_id = a and p_action in ('kick','ban','block','hard_block','demote','wipe') then raise exception 'You cannot do that to yourself'; end if;
   case p_action
     when 'kick' then
       perform kill_sessions(p_id);
@@ -662,6 +666,10 @@ begin
       update public.profiles set status = 'ok', ban_reason = null, ban_until = null where id = p_id;
     when 'block' then
       update public.profiles set status = 'blocked', ban_reason = nullif(trim(p_reason), '') where id = p_id;
+    when 'hard_block' then
+      update public.profiles set block_reason = coalesce(nullif(trim(p_reason), ''), 'Your account has been blocked.') where id = p_id;
+    when 'hard_unblock' then
+      update public.profiles set block_reason = null where id = p_id;
     when 'unblock' then
       update public.profiles set status = 'ok', ban_reason = null where id = p_id and status = 'blocked';
     when 'wipe' then
@@ -687,6 +695,20 @@ begin
 end $$;
 
 -- p_id null = every player
+-- Logs out every player except the admin who runs it.
+create or replace function public.admin_kick_all() returns jsonb
+language plpgsql security definer set search_path = public, pg_temp
+as $$
+declare a uuid := assert_admin(); n int;
+begin
+  delete from public.app_sessions where user_id <> a;
+  delete from auth.sessions where user_id <> a;
+  update public.profiles set kick_epoch = kick_epoch + 1 where id <> a;
+  get diagnostics n = row_count;
+  perform log_admin(a, 'kick_all', null, jsonb_build_object('players', n));
+  return jsonb_build_object('kicked', n);
+end $$;
+
 create or replace function public.admin_popup(p_id uuid, p_title text, p_body text) returns jsonb
 language plpgsql security definer set search_path = public, pg_temp
 as $$
@@ -1090,7 +1112,7 @@ grant execute on function
   public.get_notifications(),
   public.admin_list_players(text), public.admin_player_detail(uuid), public.admin_set_orbs(uuid, text, text),
   public.admin_grant(uuid, text, boolean, boolean, text), public.admin_grant_all(uuid, text),
-  public.admin_take(uuid, text, boolean, boolean), public.admin_action(uuid, text, text, int),
+  public.admin_take(uuid, text, boolean, boolean), public.admin_action(uuid, text, text, int), public.admin_kick_all(),
   public.admin_popup(uuid, text, text), public.admin_list_cards(), public.admin_save_card(jsonb),
   public.admin_delete_card(text), public.admin_list_packs(), public.admin_save_pack(jsonb),
   public.admin_set_config(text, jsonb), public.admin_security(), public.admin_unlock(text), public.admin_logs()
