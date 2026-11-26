@@ -665,7 +665,8 @@ as $$
 declare a uuid := assert_admin(); e jsonb := cfg('economy');
 begin
   if not exists (select 1 from public.profiles where id = p_id) then raise exception 'Player not found'; end if;
-  if p_id = a and p_action in ('kick','ban','block','hard_block','demote','wipe') then raise exception 'You cannot do that to yourself'; end if;
+  -- Wipe and reset are allowed on yourself: they only clear game progress, never role, 2FA, password or sessions.
+  if p_id = a and p_action in ('kick','ban','block','hard_block','demote') then raise exception 'You cannot do that to yourself'; end if;
   case p_action
     when 'kick' then
       perform kill_sessions(p_id);

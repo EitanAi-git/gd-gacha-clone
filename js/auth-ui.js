@@ -433,7 +433,7 @@ window.App = (function () {
         if (!cur) return;
         if (row.status === "banned") return lost("banned", row);
         if (row.kick_epoch > cur.kickEpoch) return lost("kicked", row);
-        if (row.wipe_epoch > cur.wipeEpoch) toast("An admin reset your account", "bad");
+        if (row.wipe_epoch > cur.wipeEpoch) toast("Your account progress was reset", "bad");
         if (row.block_reason && !cur.blockReason) { G.refresh().catch(() => {}); return; }
         if (row.status === "blocked" && cur.status !== "blocked") toast("Your account was suspended by an admin", "bad");
         if (row.status === "ok" && cur.status === "blocked") toast("Your account is no longer suspended", "good");
