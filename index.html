@@ -3,6 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-src https://challenges.cloudflare.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
   <title>EitanGD Gacha</title>
   <meta name="description" content="EitanGD Gacha: a fan-made Geometry Dash card collecting game. Inspired by gachagd.com.">
   <meta name="theme-color" content="#0a0e1a">
@@ -12,37 +14,48 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
+<body class="logged-out">
   <header class="top">
     <a class="logo" href="#/" aria-label="EitanGD Gacha home">
       <img src="img/icon.svg" alt="" width="34" height="34">
       <span>EitanGD <b>Gacha</b></span>
     </a>
-    <nav class="nav">
+    <nav class="nav in-only">
       <a href="#/">Home</a>
       <a href="#/catalog">Catalog</a>
-      <a href="#/admin">Admin</a>
     </nav>
     <div class="top-right">
-      <span class="orb-pill" title="Mana orbs"><span class="orb-i"></span><span id="orb-count">0</span></span>
-      <button class="icon-btn" id="mute" title="Toggle sound">🔊</button>
+      <button class="btn small admin-btn in-only" id="admin-btn" hidden>🛠 Admin</button>
+      <span class="orb-pill in-only" title="Mana orbs"><span class="orb-i"></span><span id="orb-count">0</span></span>
+      <button class="acct-btn in-only" id="acct" title="Account"><span class="avatar" aria-hidden="true">👤</span><span id="acct-name"></span></button>
+      <button class="icon-btn" id="theme" title="Theme">🌓</button>
+      <button class="icon-btn in-only" id="mute" title="Toggle sound">🔊</button>
     </div>
   </header>
+  <div id="imp-bar" class="imp-bar" hidden></div>
 
-  <main id="app"></main>
+  <main id="app"><p class="muted center loading">Loading…</p></main>
 
   <footer class="foot">
     <p><b>EitanGD Gacha</b> is a fan-made project and is not affiliated with RobTop Games or gachagd.com.</p>
     <p>Geometry Dash © RobTop Games. Every level and its name belong to its creator, who is credited on each card. Difficulty tiers follow the GD community lists (GDDL, AREDL).</p>
-    <p>Inspired by <a href="https://gachagd.com" rel="noopener" target="_blank">gachagd.com</a> by John119 and mochamaple. Card art is generated, and all code and design are original.</p>
+    <p>Inspired by <a href="https://gachagd.com" rel="noopener noreferrer" target="_blank">gachagd.com</a> by John119 and mochamaple. Card art is generated, and all code and design are original.</p>
   </footer>
 
   <div id="modal" class="modal" hidden></div>
   <div id="toasts" class="toasts" aria-live="polite"></div>
 
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+  <script src="js/vendor/supabase.js"></script><!-- @supabase/supabase-js 2.45.4 (MIT), vendored -->
+  <script src="js/config.js"></script>
   <script src="js/data.js"></script>
+  <script src="js/api.js"></script>
   <script src="js/game.js"></script>
   <script src="js/cards.js"></script>
+  <script src="js/picker.js"></script>
+  <script src="js/auth-ui.js"></script>
   <script src="js/ui.js"></script>
+  <script src="js/admin.js"></script>
+  <script src="js/boot.js"></script>
 </body>
 </html>

@@ -60,7 +60,7 @@ window.CardView = (function () {
     return D.SETS[c.set].code + " " + String(n).padStart(3, "0");
   }
 
-  // copy: optional {foil, fullArt, uid}. opts: {small, missing, count, isNew, link}
+  // copy: optional {foil, fullArt}. opts: {small, missing, count (BigInt ok), isNew, link}
   function render(c, copy, opts) {
     copy = copy || {};
     opts = opts || {};
@@ -77,12 +77,12 @@ window.CardView = (function () {
     if (opts.isNew) tags.push('<span class="tag tag-new">New</span>');
     const tagName = opts.link ? "a" : "div";
     const href = opts.link ? ` href="#/c/${encodeURIComponent(c.id)}"` : "";
-    return `<${tagName} class="${cls}"${href} style="--rc:${rar.color};--sc:${set.color}" data-card="${esc(c.id)}"${copy.uid ? ` data-uid="${copy.uid}"` : ""}>
+    return `<${tagName} class="${cls}"${href} style="--rc:${rar.color};--sc:${set.color}" data-card="${esc(c.id)}">
   <div class="card-head">
     <div class="card-title"><span class="card-name">${esc(c.name)}</span><span class="card-by">by ${esc(c.creator)}</span></div>
     <span class="diff" title="${esc(set.label)}">${set.code}</span>
   </div>
-  <div class="card-art">${art(c)}<span class="art-credit">Level © ${esc(c.creator)} · GD © RobTop</span>${tags.length ? `<div class="tags">${tags.join("")}</div>` : ""}${opts.count > 1 ? `<span class="count">×${opts.count}</span>` : ""}</div>
+  <div class="card-art">${art(c)}<span class="art-credit">Level © ${esc(c.creator)} · GD © RobTop</span>${tags.length ? `<div class="tags">${tags.join("")}</div>` : ""}${opts.count > 1 ? `<span class="count">×${window.Game.fmt(opts.count)}</span>` : ""}</div>
   <div class="card-foot"><span class="code">${code(c)}</span><span class="rar">${rar.label}</span></div>
 </${tagName}>`;
   }
