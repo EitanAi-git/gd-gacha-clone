@@ -55,7 +55,7 @@ window.UI = (function () {
 
   function blockedBanner() {
     return G.me && G.me.status === "blocked"
-      ? `<div class="notice bad">🚫 Your account is blocked by an admin. You can look around, but you can't open packs, sell or claim orbs.</div>` : "";
+      ? `<div class="notice bad">🚫 Your account is suspended by an admin. You can look around, but you can't open packs, sell or claim orbs.</div>` : "";
   }
 
   // ---------- shared ----------

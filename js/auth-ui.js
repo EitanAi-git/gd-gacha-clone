@@ -411,8 +411,8 @@ window.App = (function () {
         if (row.status === "banned") return lost("banned", row);
         if (row.kick_epoch > cur.kickEpoch) return lost("kicked", row);
         if (row.wipe_epoch > cur.wipeEpoch) toast("An admin reset your account", "bad");
-        if (row.status === "blocked" && cur.status !== "blocked") toast("Your account was blocked by an admin", "bad");
-        if (row.status === "ok" && cur.status === "blocked") toast("Your account was unblocked", "good");
+        if (row.status === "blocked" && cur.status !== "blocked") toast("Your account was suspended by an admin", "bad");
+        if (row.status === "ok" && cur.status === "blocked") toast("Your account is no longer suspended", "good");
         softRefresh();
       },
       notification() { fetchNotes(); },
