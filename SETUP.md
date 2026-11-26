@@ -154,7 +154,7 @@ Use a **private/incognito window** as a second player:
 - [ ] In your normal window: **🛠 Admin → Players → TestPlayer**:
   - [ ] **Send popup** with the preset "i am here just to annoy you". The private window shows it right away.
   - [ ] **Give a card**, any amount. It appears in the test player's collection.
-  - [ ] **Block**. The test player sees a red banner and can't open packs. Then **Unblock**.
+  - [ ] **Suspend**. The test player sees a red banner and can't open packs. Then **Unsuspend**.
   - [ ] **Kick**. The test player is logged out instantly.
   - [ ] **👁 Log in as this player**. You see their account. Click **Return to admin**.
 - [ ] Log out of the test account and try a wrong password 6 times. It gets locked, and **Admin → Security** shows the lock (click **Unlock**).
@@ -211,7 +211,7 @@ All ticked? You're done! 🎉
   - Their open page reacts within a second, and any further request fails.
 - **Admin safety:**
   - Admin actions need a 2FA session, and all are logged in **Admin → Logs**.
-  - Admins can't kick, ban or block themselves.
+  - Admins can't kick, ban or suspend themselves.
   - "Log in as" can't change the player's password or 2FA.
 - **Page hardening:**
   - A strict Content Security Policy: no inline scripts, and Cloudflare's captcha is the only outside script.

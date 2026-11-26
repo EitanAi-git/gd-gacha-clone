@@ -76,6 +76,7 @@ window.AdminPanel = (function () {
   const rarityItems = () => D.RARITIES.map((r) => ({ value: r, label: D.RARITY_INFO[r].label, color: D.RARITY_INFO[r].color }));
   const setItems = () => D.SET_ORDER.map((s) => ({ value: s, label: D.SETS[s].label, color: D.SETS[s].color }));
   const cardName = (id) => (G.card(id) ? G.card(id).name : id);
+  const statusLabel = (s) => (s === "blocked" ? "suspended" : s);   // "blocked" is the database name
   const isWhole = (v) => /^\d{1,19}$/.test(String(v).trim());
 
   // ---------- shell ----------
@@ -168,7 +169,7 @@ window.AdminPanel = (function () {
     catch (e) { $("#pl-items", v).innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
     $("#pl-items", v).innerHTML = players.length ? players.map((p) => `
       <button class="pl-item ${p.id === selected ? "active" : ""}" data-id="${p.id}">
-        <span class="pl-name"><i class="dot ${p.online ? "on" : ""}"></i>${esc(p.username)}${p.role === "admin" ? ` <span class="chip admin">admin</span>` : ""}${p.status !== "ok" ? ` <span class="chip ${p.status}">${p.status}</span>` : ""}</span>
+        <span class="pl-name"><i class="dot ${p.online ? "on" : ""}"></i>${esc(p.username)}${p.role === "admin" ? ` <span class="chip admin">admin</span>` : ""}${p.status !== "ok" ? ` <span class="chip ${p.status}">${statusLabel(p.status)}</span>` : ""}</span>
         <span class="pl-sub">${G.fmt(p.orbs)} orbs · ${G.fmt(p.cards)} cards · ${ago(p.lastSeen)}</span>
       </button>`).join("") : `<p class="muted small">No players found.</p>`;
     $$(".pl-item", v).forEach((b) => b.addEventListener("click", () => selectPlayer(b.dataset.id)));
@@ -210,8 +211,8 @@ window.AdminPanel = (function () {
     <h4>Moderation</h4>
     <div class="row wrap">
       <button class="btn small" data-act="kick" title="Log them out everywhere now">Kick</button>
-      <button class="btn small" data-act="block" title="Can log in, cannot play">Block</button>
-      <button class="btn small" data-act="unblock">Unblock</button>
+      <button class="btn small" data-act="block" title="Can log in, cannot play">Suspend</button>
+      <button class="btn small" data-act="unblock">Unsuspend</button>
       <button class="btn small" data-act="unban">Unban</button>
     </div>
     <div class="row"><input id="m-reason" data-d="m-reason" placeholder="Reason (shown to them)" maxlength="200"></div>
@@ -289,7 +290,7 @@ window.AdminPanel = (function () {
       if (risky[act] && !(await window.App.confirmBox(risky[act], act === "wipe" ? "Wipe" : "Confirm", act === "wipe" || act === "ban"))) return;
       const minutes = act === "ban" ? parseInt(draft("m-dur", "0"), 10) || null : null;
       await call("admin_action", { p_id: selected, p_action: act, p_reason: draft("m-reason", "") || null, p_minutes: minutes },
-        { kick: "Kicked", ban: "Banned", unban: "Unbanned", block: "Blocked", unblock: "Unblocked", wipe: "Wiped", reset: "Progress reset",
+        { kick: "Kicked", ban: "Banned", unban: "Unbanned", block: "Suspended", unblock: "Unsuspended", wipe: "Wiped", reset: "Progress reset",
           reset_2fa: "2FA reset", promote: "Now an admin", demote: "No longer admin" }[act], b).catch(() => {});
       loadDetail(); loadPlayers();
     }));
@@ -328,7 +329,7 @@ window.AdminPanel = (function () {
     const online = detail.sessions.length > 0;
     $("#pd-info", v).innerHTML = `
 <div class="pd-head">
-  <h3>${esc(p.username)} ${p.role === "admin" ? `<span class="chip admin">admin</span>` : ""} <span class="chip ${p.status}">${p.status}</span> <span class="chip ${online ? "on" : ""}">${online ? "online" : "offline"}</span></h3>
+  <h3>${esc(p.username)} ${p.role === "admin" ? `<span class="chip admin">admin</span>` : ""} <span class="chip ${p.status}">${statusLabel(p.status)}</span> <span class="chip ${online ? "on" : ""}">${online ? "online" : "offline"}</span></h3>
   ${p.ban_reason ? `<p class="small">Reason: ${esc(p.ban_reason)}${p.ban_until ? ` · until ${when(p.ban_until)}` : ""}</p>` : ""}
 </div>
 <dl class="pd-grid">
@@ -627,7 +628,7 @@ window.AdminPanel = (function () {
     wirePresets(v, "bp-title", "bp-body");
     const to = picker($("#bp-to", v), "bp-to", [{ value: "*", label: "Everyone", sub: "all players" }], "*");
     A.rpc("admin_list_players", { p_q: "" }).then((list) => {
-      to.setItems([{ value: "*", label: "Everyone", sub: "all players" }].concat(list.map((p) => ({ value: p.id, label: p.username, sub: p.status }))));
+      to.setItems([{ value: "*", label: "Everyone", sub: "all players" }].concat(list.map((p) => ({ value: p.id, label: p.username, sub: statusLabel(p.status) }))));
     }).catch(() => {});
     $("#bp-go", v).addEventListener("click", async (e) => {
       const body = String(draft("bp-body", "")).trim();

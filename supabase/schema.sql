@@ -268,7 +268,7 @@ begin
       raise exception 'Banned' using errcode = '28000';
     end if;
   end if;
-  if p_play and p.status = 'blocked' then raise exception 'Your account is blocked'; end if;
+  if p_play and p.status = 'blocked' then raise exception 'Your account is suspended'; end if;
   if p.last_seen < now() - interval '1 minute' then
     update public.profiles set last_seen = now() where id = uid;
   end if;
