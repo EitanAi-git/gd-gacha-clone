@@ -170,10 +170,10 @@ window.App = (function () {
       const btn = $("#auth-go"); btn.disabled = true; btn.textContent = "Please wait…";
       try {
         const r = await A.fn(authTab, { username, password, captcha: captchaToken });
-        if (r.twofa) { pendingChallenge = { id: r.challenge, email: r.email }; return showTwofa(pendingChallenge); }
+        if (r.twofa) { pendingChallenge = { id: r.challenge }; return showTwofa(pendingChallenge); }
         await A.setSession(r.session);
         await start();
-        if (r.needsTwofa) toast("Admin: turn on email 2FA in Account to unlock the admin panel", "bad");
+        if (r.needsTwofa) toast("Admin: turn on 2FA in Account to unlock the admin panel", "bad");
       } catch (ex) {
         if (ex.extra && ex.extra.banned) err.textContent = banText(ex.extra.reason, ex.extra.until);
         else err.textContent = ex.message;
@@ -187,8 +187,9 @@ window.App = (function () {
     setLoggedOutChrome(true);
     $("#app").innerHTML = `
 <section class="auth-box panel">
-  <h1>Check your email</h1>
-  <p>We sent a 6-digit code to <b>${esc(ch.email)}</b>. It expires in 10 minutes.</p>
+  <div class="center" style="font-size:2.4rem">📱</div>
+  <h1 class="center">Enter your 2FA code</h1>
+  <p class="center">Open your authenticator app and type the 6-digit code for <b>EitanGD Gacha</b>.</p>
   <form id="tf-form" novalidate>
     <input id="tf-code" class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="\\d{6}" placeholder="000000" aria-label="6-digit code">
     <div class="err" id="tf-err" role="alert"></div>
@@ -309,7 +310,7 @@ window.App = (function () {
           <p>Username: <b>${esc(me.username)}</b>${me.role === "admin" ? ` <span class="chip admin">admin</span>` : ""}</p>
         </section>
         <section>
-          <h3>Email 2FA</h3>
+          <h3>Two-factor login (2FA)</h3>
           <div id="tf-area"></div>
         </section>
         <section>
@@ -329,8 +330,8 @@ window.App = (function () {
 
     function renderTf() {
       if (G.me.twofaEnabled) {
-        area.innerHTML = `<p>✅ On. Codes go to <b>${esc(G.me.twofaEmail)}</b>.</p>
-          ${G.me.role === "admin" ? `<p class="small muted">Admins must keep 2FA on.</p>` :
+        area.innerHTML = `<p>✅ On. Logging in asks for a code from your authenticator app.</p>
+          ${G.me.role === "admin" ? `<p class="small muted">Admins must keep 2FA on. If you lose your phone, see "Lost your phone" in SETUP.md.</p>` :
           `<form id="tf-off" class="row"><input type="password" id="tf-off-pw" placeholder="Password to turn off" autocomplete="current-password"><button class="btn small">Turn off</button></form><div class="err" id="tf-off-err"></div>`}`;
         const off = $("#tf-off", area);
         if (off) off.addEventListener("submit", async (e) => {
@@ -338,28 +339,37 @@ window.App = (function () {
           try { await A.fn("twofaDisable", { password: $("#tf-off-pw", area).value }); await G.refresh(); renderTf(); toast("2FA turned off"); }
           catch (ex) { $("#tf-off-err", area).textContent = ex.message; }
         });
-      } else {
-        area.innerHTML = `<p class="small muted">${G.me.role === "admin" ? "Required to use the admin panel." : "Optional. When on, logging in also needs a code sent to your email."}</p>
-          <form id="tf-start" class="row"><input type="email" id="tf-email" placeholder="you@example.com" autocomplete="email"><button class="btn small">Send code</button></form>
-          <div class="err" id="tf-err2"></div>`;
-        $("#tf-start", area).addEventListener("submit", async (e) => {
-          e.preventDefault();
-          try {
-            const r = await A.fn("twofaStart", { email: $("#tf-email", area).value.trim() });
-            area.innerHTML = `<p>Enter the code sent to <b>${esc(r.email)}</b>.</p>
-              <form id="tf-conf" class="row"><input id="tf-c" class="code-input sm" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code"><button class="btn small primary">Confirm</button></form>
-              <div class="err" id="tf-err3"></div>`;
-            $("#tf-c", area).focus();
-            $("#tf-conf", area).addEventListener("submit", async (ev) => {
-              ev.preventDefault();
-              try {
-                await A.fn("twofaConfirm", { challenge: r.challenge, code: $("#tf-c", area).value.trim() });
-                await G.refresh(); renderTf(); toast("2FA is on", "good");
-              } catch (ex) { $("#tf-err3", area).textContent = ex.message; }
-            });
-          } catch (ex) { $("#tf-err2", area).textContent = ex.message; }
-        });
+        return;
       }
+      area.innerHTML = `<p class="small muted">${G.me.role === "admin" ? "Required to use the admin panel." : "Optional. Logging in will also need a code from your phone."}
+          You need an authenticator app such as Google Authenticator, Microsoft Authenticator, Authy or 2FAS.</p>
+        <button class="btn small primary" id="tf-begin">Set up 2FA</button><div class="err" id="tf-err2"></div>`;
+      $("#tf-begin", area).addEventListener("click", async (e) => {
+        e.target.disabled = true;
+        try {
+          const r = await A.fn("twofaStart", {});
+          let qr = "";
+          try { const q = window.qrcode(0, "M"); q.addData(r.uri); q.make(); qr = q.createSvgTag({ cellSize: 4, margin: 3, scalable: true }); } catch (er) { /* show the key only */ }
+          area.innerHTML = `
+            <ol class="tf-steps">
+              <li>In your authenticator app, tap <b>+</b> and <b>scan this QR code</b>:</li>
+            </ol>
+            <div class="qr">${qr}</div>
+            <p class="small muted center">Can't scan? Choose "enter a setup key" and type:<br><code class="secret">${esc(r.secret.replace(/(.{4})/g, "$1 ").trim())}</code></p>
+            <ol class="tf-steps" start="2"><li>Type the 6-digit code the app shows:</li></ol>
+            <form id="tf-conf" class="row"><input id="tf-c" class="code-input sm" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code" aria-label="6-digit code"><button class="btn small primary">Turn on 2FA</button></form>
+            <div class="err" id="tf-err3"></div>`;
+          $("#tf-c", area).focus();
+          $("#tf-c", area).addEventListener("input", (ev) => { ev.target.value = ev.target.value.replace(/\D/g, "").slice(0, 6); });
+          $("#tf-conf", area).addEventListener("submit", async (ev) => {
+            ev.preventDefault();
+            try {
+              await A.fn("twofaConfirm", { code: $("#tf-c", area).value.trim() });
+              await G.refresh(); renderTf(); toast("2FA is on", "good");
+            } catch (ex) { $("#tf-err3", area).textContent = ex.message; }
+          });
+        } catch (ex) { $("#tf-err2", area).textContent = ex.message; e.target.disabled = false; }
+      });
     }
     renderTf();
 
