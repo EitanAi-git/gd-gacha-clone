@@ -306,7 +306,9 @@ window.AdminPanel = (function () {
     $$("[data-act]", pd2).forEach((b) => b.addEventListener("click", async () => {
       const act = b.dataset.act;
       const name = detail ? detail.profile.username : "this player";
-      const risky = { wipe: `Wipe ${name}? All their cards and orbs are deleted.`, reset: `Reset ${name}'s progress?`,
+      const self = selected === G.me.id;
+      const risky = { wipe: self ? "Wipe your own account? Your cards, orbs and progress are deleted. You stay admin, and your 2FA and password don't change."
+        : `Wipe ${name}? All their cards and orbs are deleted.`, reset: `Reset ${name}'s progress?`,
         ban: `Ban ${name}? They are logged out right away.`, hard_block: `Block ${name}? They will see a popup they can't close.`, promote: `Make ${name} an admin?`, demote: `Remove admin from ${name}?` };
       if (risky[act] && !(await window.App.confirmBox(risky[act], act === "wipe" ? "Wipe" : "Confirm", act === "wipe" || act === "ban"))) return;
       const minutes = act === "ban" ? parseInt(draft("m-dur", "0"), 10) || null : null;
