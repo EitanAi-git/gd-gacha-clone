@@ -622,17 +622,30 @@ begin
   return jsonb_build_object('qty', res::text);
 end $$;
 
-create or replace function public.admin_grant_all(p_id uuid, p_qty text) returns void
+drop function if exists public.admin_grant_all(uuid, text);
+
+-- Gives p_qty copies of every card, in each chosen version: normal | foil | full | foil_full
+create or replace function public.admin_grant_all(p_id uuid, p_qty text, p_versions text[]) returns jsonb
 language plpgsql security definer set search_path = public, pg_temp
 as $$
-declare a uuid := assert_admin(); q bigint := parse_qty(p_qty);
+declare a uuid := assert_admin(); q bigint := parse_qty(p_qty); n int;
 begin
   if not exists (select 1 from public.profiles where id = p_id) then raise exception 'Player not found'; end if;
+  if p_versions is null or cardinality(p_versions) = 0 then raise exception 'Choose at least one version'; end if;
+  if exists (select 1 from unnest(p_versions) v where v not in ('normal','foil','full','foil_full')) then
+    raise exception 'Unknown version';
+  end if;
   insert into public.collection as c (user_id, card_id, foil, full_art, qty)
-    select p_id, id, false, false, q from public.cards
+    select p_id, cd.id, v.foil, v.full_art, q
+    from public.cards cd
+    cross join (values ('normal', false, false), ('foil', true, false), ('full', false, true), ('foil_full', true, true))
+      as v(name, foil, full_art)
+    where v.name = any(p_versions)
     on conflict (user_id, card_id, foil, full_art)
     do update set qty = least(9223372036854775807::numeric, c.qty::numeric + q)::bigint, last_at = now();
-  perform log_admin(a, 'grant_all', p_id, jsonb_build_object('qty', p_qty));
+  get diagnostics n = row_count;
+  perform log_admin(a, 'grant_all', p_id, jsonb_build_object('qty', p_qty, 'versions', to_jsonb(p_versions)));
+  return jsonb_build_object('rows', n);
 end $$;
 
 create or replace function public.admin_take(p_id uuid, p_card text, p_foil boolean, p_full boolean) returns void
@@ -1111,7 +1124,7 @@ grant execute on function
   public.open_pack(text, int, text), public.sell(jsonb), public.sell_duplicates(text[]), public.toggle_favorite(text),
   public.get_notifications(),
   public.admin_list_players(text), public.admin_player_detail(uuid), public.admin_set_orbs(uuid, text, text),
-  public.admin_grant(uuid, text, boolean, boolean, text), public.admin_grant_all(uuid, text),
+  public.admin_grant(uuid, text, boolean, boolean, text), public.admin_grant_all(uuid, text, text[]),
   public.admin_take(uuid, text, boolean, boolean), public.admin_action(uuid, text, text, int), public.admin_kick_all(),
   public.admin_popup(uuid, text, text), public.admin_list_cards(), public.admin_save_card(jsonb),
   public.admin_delete_card(text), public.admin_list_packs(), public.admin_save_pack(jsonb),
