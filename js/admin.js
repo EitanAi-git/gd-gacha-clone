@@ -205,7 +205,18 @@ window.AdminPanel = (function () {
     <div class="row"><input id="g-qty" data-d="g-qty" value="1" inputmode="numeric" placeholder="How many (no limit)" aria-label="Quantity">
       <button class="btn small ghost" id="g-max" title="Biggest number allowed">∞ Max</button>
       <button class="btn small primary" id="g-go">Give</button></div>
-    <button class="btn small" id="g-all">Give one of every card</button>
+  </section>
+  <section class="pa">
+    <h4>Give every card</h4>
+    <div class="row"><input id="ga-qty" data-d="ga-qty" value="1" inputmode="numeric" placeholder="How many of each (no limit)" aria-label="How many of each card">
+      <button class="btn small ghost" id="ga-max" title="Biggest number allowed">∞ Max</button></div>
+    <div class="row wrap">
+      <label class="check"><input type="checkbox" data-d="ga-normal" checked> Normal</label>
+      <label class="check"><input type="checkbox" data-d="ga-foil"> Foil</label>
+      <label class="check"><input type="checkbox" data-d="ga-full"> Full art</label>
+      <label class="check"><input type="checkbox" data-d="ga-foil_full"> Foil + full art</label>
+    </div>
+    <button class="btn small primary" id="g-all">Give every card</button>
   </section>
   <section class="pa">
     <h4>Moderation</h4>
@@ -281,10 +292,15 @@ window.AdminPanel = (function () {
         `Gave ${G.fmt(qty)} × ${cardName(card)}`, e.target).catch(() => {});
       loadDetail(); loadPlayers();
     });
+    $("#ga-max", pd2).addEventListener("click", () => { drafts["ga-qty"] = MAX; $("#ga-qty", pd2).value = MAX; });
     $("#g-all", pd2).addEventListener("click", async (e) => {
-      const qty = String(draft("g-qty", "1")).trim();
-      if (!isWhole(qty) || qty === "0") return toast("Quantity must be a whole number", "bad");
-      await call("admin_grant_all", { p_id: selected, p_qty: qty }, `Gave ${G.fmt(qty)} of every card`, e.target).catch(() => {});
+      const qty = String(draft("ga-qty", "1")).trim();
+      if (!isWhole(qty) || qty === "0" || BigInt(qty) > BigInt(MAX)) return toast("Amount must be a whole number from 1 up to " + G.fmt(MAX), "bad");
+      const versions = ["normal", "foil", "full", "foil_full"].filter((v) => draft("ga-" + v, v === "normal"));
+      if (!versions.length) return toast("Tick at least one version", "bad");
+      const names = { normal: "normal", foil: "foil", full: "full art", foil_full: "foil + full art" };
+      await call("admin_grant_all", { p_id: selected, p_qty: qty, p_versions: versions },
+        `Gave ${G.fmt(qty)} of every card (${versions.map((v) => names[v]).join(", ")})`, e.target).catch(() => {});
       loadDetail(); loadPlayers();
     });
     $$("[data-act]", pd2).forEach((b) => b.addEventListener("click", async () => {
